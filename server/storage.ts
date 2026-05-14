@@ -1,32 +1,25 @@
-import { users } from '@shared/schema';
-import type { User, InsertUser } from '@shared/schema';
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
-import { eq } from "drizzle-orm";
-
-const sqlite = new Database("data.db");
-sqlite.pragma("journal_mode = WAL");
-
-export const db = drizzle(sqlite);
+import { db } from "./db";
+import { palettes, type InsertPalette, type Palette } from "@shared/schema";
+import { eq, desc } from "drizzle-orm";
 
 export interface IStorage {
-  getUser(id: number): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  getAllPalettes(): Palette[];
+  savePalette(palette: InsertPalette): Palette;
+  deletePalette(id: number): void;
 }
 
-export class DatabaseStorage implements IStorage {
-  async getUser(id: number): Promise<User | undefined> {
-    return db.select().from(users).where(eq(users.id, id)).get();
+export class Storage implements IStorage {
+  getAllPalettes(): Palette[] {
+    return db.select().from(palettes).orderBy(desc(palettes.createdAt)).all();
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return db.select().from(users).where(eq(users.username, username)).get();
+  savePalette(palette: InsertPalette): Palette {
+    return db.insert(palettes).values(palette).returning().get();
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    return db.insert(users).values(insertUser).returning().get();
+  deletePalette(id: number): void {
+    db.delete(palettes).where(eq(palettes.id, id)).run();
   }
 }
 
-export const storage = new DatabaseStorage();
+export const storage = new Storage();

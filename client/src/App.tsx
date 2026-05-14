@@ -1,32 +1,1357 @@
-import { Switch, Route, Router } from "wouter";
-import { useHashLocation } from "wouter/use-hash-location";
-import { queryClient } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "@/components/ui/toaster";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/not-found";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import {
+  hexToRgb, hexToHsl, hexToHsv, hexToCmyk, getColorTemp, kelvinToRgb, rgbToHex,
+  hslToHex, generateRandomColor, harmonies, simulateColorBlindness,
+  getContrastRatio, getWCAGRating, getContrastText, blendColors, generateBlendSteps,
+  frequencyToColors, generateSequential, generateDiverging, generateQualitative,
+  generateHeatmap, THEMES, aiPromptToColors, formatExport, getColorName,
+} from "@/lib/colorEngine";
+import { ACHIEVEMENTS, type AchievementId } from "@/lib/achievements";
+import type { Palette } from "@shared/schema";
 
-function AppRouter() {
+// ─── Types ────────────────────────────────────────────────────────────────
+type HarmonyMode = "complementary"|"analogous"|"triadic"|"splitComplementary"|"tetradic"|"square"|"monochromatic"|"shadesTints"|"random";
+type VisionMode = "normal"|"protanopia"|"deuteranopia"|"tritanopia"|"achromatopsia";
+type Tab = "generator"|"blend"|"image"|"gradient"|"dataviz"|"music"|"ai"|"seasonal"|"export"|"saved";
+type GradientType = "linear"|"radial"|"conic";
+type DataVizType = "sequential"|"diverging"|"qualitative"|"heatmap";
+type ExportFormat = "css"|"scss"|"tailwind"|"json"|"array";
+
+// ─── Achievement Toast ────────────────────────────────────────────────────
+function AchievementToast({ name, icon, onClose }: { name: string; icon: string; onClose: () => void }) {
+  useEffect(() => { const t = setTimeout(onClose, 3500); return () => clearTimeout(t); }, [onClose]);
   return (
-    <Switch>
-      {/* Register a <Route path="..." component={...} /> for EVERY page linked in your sidebar/nav. Missing routes cause 404. */}
-      {/* <Route path="/" component={Home}/> */}
-      <Route component={NotFound} />
-    </Switch>
+    <div className="achievement-toast fixed bottom-6 right-6 z-50 glass-card px-5 py-4 flex items-center gap-3 min-w-[240px]">
+      <span className="text-2xl">{icon}</span>
+      <div>
+        <div className="text-xs text-purple-400 font-semibold uppercase tracking-widest">Achievement</div>
+        <div className="text-sm font-bold text-white mt-0.5">{name}</div>
+      </div>
+      <div className="ml-auto text-purple-400 opacity-60 text-xs">+50 pts</div>
+    </div>
   );
 }
 
-function App() {
+// ─── Color Card ───────────────────────────────────────────────────────────
+function ColorCard({
+  color, index, locked, onLock, onClick, onCopy, visionMode, points,
+}: {
+  color: string; index: number; locked: boolean; onLock: (i: number) => void;
+  onClick: (i: number) => void; onCopy: (hex: string) => void; visionMode: VisionMode; points: number;
+}) {
+  const displayColor = simulateColorBlindness(color, visionMode);
+  const textColor = getContrastText(displayColor);
+  const wcag = getWCAGRating(displayColor);
+  const [h, s, l] = hexToHsl(color);
+  const name = getColorName(color);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(color);
+    setCopied(true);
+    onCopy(color);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const wcagColors = { AAA: "bg-emerald-500/90", AA: "bg-yellow-500/90", Fail: "bg-red-500/90" };
+
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Router hook={useHashLocation}>
-          <AppRouter />
-        </Router>
-      </TooltipProvider>
-    </QueryClientProvider>
+    <div
+      className="color-card flex-1 min-w-0 flex flex-col"
+      style={{ backgroundColor: displayColor, minHeight: 180 }}
+      onClick={() => onClick(index)}
+      data-testid={`color-card-${index}`}
+    >
+      <div className="card-overlay" />
+
+      {/* Top row */}
+      <div className="relative flex items-start justify-between p-3">
+        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${wcagColors[wcag]}`} style={{ color: "#fff" }}>
+          {wcag}
+        </span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onLock(index); }}
+          className="w-7 h-7 rounded-full flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.35)", color: textColor }}
+          data-testid={`lock-btn-${index}`}
+          data-tip={locked ? "Unlock" : "Lock"}
+        >
+          {locked ? "🔒" : "🔓"}
+        </button>
+      </div>
+
+      {/* Center */}
+      <div className="relative flex-1 flex flex-col items-center justify-center gap-1 px-3">
+        <div className="text-[10px] font-mono opacity-70" style={{ color: textColor }}>{name}</div>
+        <div className="text-sm font-bold font-mono" style={{ color: textColor }}>{color.toUpperCase()}</div>
+      </div>
+
+      {/* Bottom */}
+      <div className="relative flex items-center justify-between p-3">
+        <div className="text-[9px] opacity-55 font-mono" style={{ color: textColor }}>H{h} S{s} L{l}</div>
+        <button
+          onClick={handleCopy}
+          className="w-7 h-7 rounded-full flex items-center justify-center text-sm transition-transform active:scale-90"
+          style={{ background: "rgba(0,0,0,0.35)", color: textColor }}
+          data-testid={`copy-btn-${index}`}
+          data-tip="Copy HEX"
+        >
+          {copied ? "✓" : "⎘"}
+        </button>
+      </div>
+
+      {/* Locked indicator */}
+      {locked && (
+        <div
+          className="absolute bottom-0 left-0 right-0 h-1"
+          style={{ background: "rgba(168,85,247,0.7)" }}
+        />
+      )}
+    </div>
   );
 }
 
-export default App;
+// ─── Color Info Modal ─────────────────────────────────────────────────────
+function ColorInfoModal({ color, onClose }: { color: string; onClose: () => void }) {
+  const [r, g, b] = hexToRgb(color);
+  const [h, s, l] = hexToHsl(color);
+  const [hv, sv, v] = hexToHsv(color);
+  const [c, m, y, k] = hexToCmyk(color);
+  const temp = getColorTemp(color);
+  const ratio = getContrastRatio(color);
+  const name = getColorName(color);
+  const textColor = getContrastText(color);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div className="glass-card relative w-full max-w-sm z-10 p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="w-full h-24 rounded-xl mb-5" style={{ backgroundColor: color }}>
+          <div className="h-full flex items-center justify-center">
+            <span className="font-mono font-bold text-lg" style={{ color: textColor }}>{color.toUpperCase()}</span>
+          </div>
+        </div>
+        <div className="font-bold text-lg mb-4" style={{ fontFamily: "var(--font-display)" }}>{name}</div>
+        <div className="grid grid-cols-2 gap-2 text-sm">
+          {[
+            ["HEX", color.toUpperCase()],
+            ["RGB", `${r}, ${g}, ${b}`],
+            ["HSL", `${h}°, ${s}%, ${l}%`],
+            ["HSV", `${hv}°, ${sv}%, ${v}%`],
+            ["CMYK", `${c}% ${m}% ${y}% ${k}%`],
+            ["Temp", `~${temp}K`],
+            ["Contrast", `${ratio}:1`],
+            ["WCAG", getWCAGRating(color)],
+          ].map(([label, val]) => (
+            <div key={label} className="glass px-3 py-2 rounded-lg">
+              <div className="text-[10px] text-purple-400 font-semibold">{label}</div>
+              <div className="text-xs font-mono mt-0.5">{val}</div>
+            </div>
+          ))}
+        </div>
+        <button onClick={onClose} className="glass-button w-full mt-5 py-2 rounded-xl text-sm font-semibold">
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main App ─────────────────────────────────────────────────────────────
+export default function App() {
+  const qc = useQueryClient();
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // ── State
+  const [colors, setColors] = useState<string[]>(() => harmonies.complementary("#7c3aed"));
+  const [locked, setLocked] = useState<boolean[]>([false, false, false, false, false]);
+  const [harmonyMode, setHarmonyMode] = useState<HarmonyMode>("complementary");
+  const [baseColor, setBaseColor] = useState("#7c3aed");
+  const [visionMode, setVisionMode] = useState<VisionMode>("normal");
+  const [tab, setTab] = useState<Tab>("generator");
+  const [history, setHistory] = useState<string[][]>([]);
+  const [points, setPoints] = useState(0);
+  const [unlocked, setUnlocked] = useState<Set<AchievementId>>(new Set());
+  const [toast, setToast] = useState<{ id: AchievementId; name: string; icon: string } | null>(null);
+  const [paletteName, setPaletteName] = useState("");
+  const [genCount, setGenCount] = useState(0);
+  const [infoColor, setInfoColor] = useState<string | null>(null);
+  const [showAchievements, setShowAchievements] = useState(false);
+  const [triedHarmonies, setTriedHarmonies] = useState<Set<string>>(new Set());
+  const [exportFormats, setExportFormats] = useState<Set<string>>(new Set());
+  const [isDark, setIsDark] = useState(true);
+
+  // Blend tab
+  const [blendColor1, setBlendColor1] = useState("#a855f7");
+  const [blendColor2, setBlendColor2] = useState("#22d3ee");
+  const [blendRatio, setBlendRatio] = useState(50);
+  const blendResult = blendColors(blendColor1, blendColor2, blendRatio);
+
+  // Gradient tab
+  const [gradientType, setGradientType] = useState<GradientType>("linear");
+  const [gradientAngle, setGradientAngle] = useState(135);
+
+  // Data viz
+  const [dvType, setDvType] = useState<DataVizType>("sequential");
+  const [dvSteps, setDvSteps] = useState(5);
+
+  // Music
+  const [frequency, setFrequency] = useState(440);
+
+  // AI
+  const [aiPrompt, setAiPrompt] = useState("");
+
+  // Image
+  const [extractedColors, setExtractedColors] = useState<string[]>([]);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+
+  // Export
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("css");
+  const [exportCopied, setExportCopied] = useState(false);
+  const [gradientCopied, setGradientCopied] = useState(false);
+  const [urlCopied, setUrlCopied] = useState(false);
+
+  // Temperature
+  const [kelvin, setKelvin] = useState(5500);
+
+  // Dark mode
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", isDark);
+    document.documentElement.classList.toggle("light", !isDark);
+  }, [isDark]);
+
+  // ── Saved palettes
+  const { data: savedPalettes = [] } = useQuery<Palette[]>({
+    queryKey: ["/api/palettes"],
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: (data: { name: string; colors: string }) =>
+      apiRequest("POST", "/api/palettes", data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/palettes"] }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/palettes/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/palettes"] }),
+  });
+
+  // ── Achievement unlock
+  const tryUnlock = useCallback((id: AchievementId, bonus: number = 0) => {
+    if (unlocked.has(id)) return;
+    const ach = ACHIEVEMENTS.find((a) => a.id === id);
+    if (!ach) return;
+    setUnlocked((prev) => new Set([...prev, id]));
+    setPoints((p) => p + ach.points + bonus);
+    setToast({ id, name: ach.name, icon: ach.icon });
+  }, [unlocked]);
+
+  // ── Points helper
+  const addPoints = useCallback((n: number) => setPoints((p) => p + n), []);
+
+  // ── Generate palette
+  const generate = useCallback((mode?: HarmonyMode) => {
+    const m = mode || harmonyMode;
+    const fn = harmonies[m as keyof typeof harmonies] as Function;
+    const newColors = colors.map((c, i) =>
+      locked[i] ? c : (fn(baseColor) as string[])[i] || generateRandomColor()
+    );
+    setColors(newColors);
+    setHistory((h) => [newColors, ...h].slice(0, 20));
+    setGenCount((n) => {
+      const next = n + 1;
+      if (next === 1) tryUnlock("first_steps");
+      if (next === 10) tryUnlock("prolific");
+      if (next === 50) tryUnlock("master_colorist");
+      return next;
+    });
+    addPoints(10);
+    setTriedHarmonies((t) => {
+      const next = new Set([...t, m]);
+      if (next.size >= 9) tryUnlock("harmony_master");
+      return next;
+    });
+  }, [harmonyMode, baseColor, colors, locked, addPoints, tryUnlock]);
+
+  // Check century
+  useEffect(() => {
+    if (points >= 100) tryUnlock("century");
+  }, [points, tryUnlock]);
+
+  // ── Gradient CSS
+  const gradientCSS = () => {
+    const stops = colors.join(", ");
+    if (gradientType === "linear") return `linear-gradient(${gradientAngle}deg, ${stops})`;
+    if (gradientType === "radial") return `radial-gradient(circle, ${stops})`;
+    return `conic-gradient(${stops})`;
+  };
+
+  // ── Image extraction
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const src = ev.target?.result as string;
+      setImagePreview(src);
+      const img = new Image();
+      img.onload = () => {
+        const canvas = canvasRef.current!;
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0);
+        const data = ctx.getImageData(0, 0, img.width, img.height).data;
+        const freq: Record<string, number> = {};
+        for (let i = 0; i < data.length; i += 40 * 4) {
+          const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+          if (a < 128) continue;
+          const hex = rgbToHex(r, g, b);
+          freq[hex] = (freq[hex] || 0) + 1;
+        }
+        const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([h]) => h);
+        setExtractedColors(sorted);
+        tryUnlock("image_analyst");
+        addPoints(25);
+      };
+      img.src = src;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // ── Tabs config
+  const TABS: { id: Tab; label: string }[] = [
+    { id: "generator", label: "Generator" },
+    { id: "blend", label: "Blend" },
+    { id: "gradient", label: "Gradient" },
+    { id: "image", label: "Image" },
+    { id: "dataviz", label: "Data Viz" },
+    { id: "music", label: "Music" },
+    { id: "ai", label: "AI" },
+    { id: "seasonal", label: "Themes" },
+    { id: "export", label: "Export" },
+    { id: "saved", label: "Saved" },
+  ];
+
+  const HARMONY_MODES: { id: HarmonyMode; label: string }[] = [
+    { id: "complementary", label: "Complement" },
+    { id: "analogous", label: "Analogous" },
+    { id: "triadic", label: "Triadic" },
+    { id: "splitComplementary", label: "Split-Comp" },
+    { id: "tetradic", label: "Tetradic" },
+    { id: "square", label: "Square" },
+    { id: "monochromatic", label: "Mono" },
+    { id: "shadesTints", label: "Shades" },
+    { id: "random", label: "Random" },
+  ];
+
+  const VISION_MODES: { id: VisionMode; label: string }[] = [
+    { id: "normal", label: "Normal" },
+    { id: "protanopia", label: "Protanopia" },
+    { id: "deuteranopia", label: "Deuteranopia" },
+    { id: "tritanopia", label: "Tritanopia" },
+    { id: "achromatopsia", label: "Achromato" },
+  ];
+
+  return (
+    <div className={`min-h-dvh pixel-grid relative ${isDark ? "" : "light"}`}>
+      {/* Bg orbs */}
+      <div className="bg-orb w-96 h-96 bg-purple-600 top-[-10%] left-[-5%]" />
+      <div className="bg-orb w-80 h-80 bg-cyan-500 top-[30%] right-[-8%]" />
+      <div className="bg-orb w-64 h-64 bg-pink-600 bottom-[10%] left-[20%]" />
+
+      <canvas ref={canvasRef} className="hidden" />
+
+      {/* Achievement toast */}
+      {toast && (
+        <AchievementToast
+          name={toast.name}
+          icon={toast.icon}
+          onClose={() => setToast(null)}
+        />
+      )}
+
+      {/* Color info modal */}
+      {infoColor && (
+        <ColorInfoModal color={infoColor} onClose={() => setInfoColor(null)} />
+      )}
+
+      {/* Achievements modal */}
+      {showAchievements && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowAchievements(false)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="glass-card relative z-10 w-full max-w-lg p-6 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="font-bold text-xl mb-5" style={{ fontFamily: "var(--font-display)" }}>
+              Achievements <span className="text-purple-400">{unlocked.size}/{ACHIEVEMENTS.length}</span>
+            </div>
+            <div className="grid grid-cols-1 gap-3">
+              {ACHIEVEMENTS.map((a) => (
+                <div key={a.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${unlocked.has(a.id) ? "border-lime-500/40 bg-lime-500/10" : "border-white/8 bg-white/3"}`}>
+                  <span className="text-xl w-8 text-center">{a.icon}</span>
+                  <div className="flex-1">
+                    <div className={`text-sm font-semibold ${unlocked.has(a.id) ? "text-lime-400" : "text-white/50"}`}>{a.name}</div>
+                    <div className="text-xs text-white/35">{a.description}</div>
+                  </div>
+                  <span className={`text-xs font-mono ${unlocked.has(a.id) ? "text-lime-400" : "text-white/25"}`}>+{a.points}pts</span>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setShowAchievements(false)} className="glass-button w-full mt-5 py-2 rounded-xl text-sm font-semibold">
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Header ── */}
+      <header className="relative z-10 glass border-b border-white/8 px-4 py-3">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 flex-wrap">
+          {/* Logo */}
+          <div className="flex items-center gap-2.5">
+            <svg viewBox="0 0 32 32" width="32" height="32" fill="none" aria-label="ChromaFlow">
+              <rect x="2" y="2" width="12" height="12" rx="3" fill="#a855f7" />
+              <rect x="18" y="2" width="12" height="12" rx="3" fill="#22d3ee" />
+              <rect x="2" y="18" width="12" height="12" rx="3" fill="#f472b6" />
+              <rect x="18" y="18" width="12" height="12" rx="3" fill="#a3e635" />
+              <rect x="10" y="10" width="12" height="12" rx="3" fill="#fbbf24" opacity="0.9" />
+            </svg>
+            <span className="logo-text font-bold text-lg tracking-tight neon-glow-purple">ChromaFlow</span>
+          </div>
+
+          {/* Right controls */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Vision mode */}
+            <select
+              value={visionMode}
+              onChange={(e) => setVisionMode(e.target.value as VisionMode)}
+              className="text-xs"
+              data-testid="vision-select"
+            >
+              {VISION_MODES.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+            </select>
+
+            {/* Points */}
+            <button
+              onClick={() => setShowAchievements(true)}
+              className="glass-button px-3 py-1.5 rounded-full text-xs font-mono flex items-center gap-1.5"
+              data-testid="points-btn"
+            >
+              <span className="text-purple-400">★</span>
+              <span>{points}</span>
+              <span className="text-white/40">pts</span>
+            </button>
+
+            {/* Dark mode toggle */}
+            <button
+              onClick={() => setIsDark((d) => !d)}
+              className="glass-button w-9 h-9 rounded-full flex items-center justify-center text-sm"
+              data-testid="theme-toggle"
+            >
+              {isDark ? "☀" : "☽"}
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* ── Palette Bar ── */}
+      <div className="relative z-10 max-w-7xl mx-auto px-4 pt-4">
+        <div className="flex gap-2 mb-4" style={{ height: 200 }}>
+          {colors.map((c, i) => (
+            <ColorCard
+              key={i}
+              color={c}
+              index={i}
+              locked={locked[i]}
+              visionMode={visionMode}
+              points={points}
+              onLock={(idx) => {
+                setLocked((l) => { const n = [...l]; n[idx] = !n[idx]; return n; });
+                addPoints(2);
+              }}
+              onClick={(idx) => setInfoColor(simulateColorBlindness(colors[idx], visionMode))}
+              onCopy={() => addPoints(1)}
+            />
+          ))}
+        </div>
+
+        {/* Generate bar */}
+        <div className="glass-card px-4 py-3 mb-4 flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-white/50">Base</label>
+            <input
+              type="color"
+              value={baseColor}
+              onChange={(e) => setBaseColor(e.target.value)}
+              className="w-9 h-9 cursor-pointer rounded-lg"
+              data-testid="base-color-input"
+            />
+          </div>
+          <div className="flex gap-1 flex-wrap flex-1">
+            {HARMONY_MODES.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => {
+                  setHarmonyMode(m.id);
+                  generate(m.id);
+                }}
+                className={`tab-pill text-xs ${harmonyMode === m.id ? "active" : ""}`}
+                data-testid={`harmony-${m.id}`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => generate()}
+            className="glass-button px-5 py-2 rounded-full text-sm font-bold text-purple-300 border border-purple-500/40"
+            data-testid="generate-btn"
+          >
+            ↺ Generate
+          </button>
+        </div>
+      </div>
+
+      {/* ── Tabs ── */}
+      <div className="relative z-10 max-w-7xl mx-auto px-4">
+        <div className="flex gap-1 overflow-x-auto pb-1 mb-4">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`tab-pill shrink-0 ${tab === t.id ? "active" : ""}`}
+              data-testid={`tab-${t.id}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Tab Content ── */}
+        <div className="pb-12">
+
+          {/* ── Generator Tab ── */}
+          {tab === "generator" && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Recent palettes */}
+              <div className="glass-card p-5">
+                <h2 className="font-bold mb-4" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  Recent Palettes
+                  <span className="ml-2 text-xs text-purple-400 font-mono">{history.length}/20</span>
+                </h2>
+                {history.length === 0 ? (
+                  <p className="text-sm text-white/30">Generate a palette to start your history</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {history.slice(0, 8).map((pal, i) => (
+                      <div
+                        key={i}
+                        className="mini-palette"
+                        onClick={() => setColors(pal)}
+                        data-testid={`history-${i}`}
+                      >
+                        {pal.map((c, j) => (
+                          <div key={j} style={{ backgroundColor: c, flex: 1 }} />
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Temperature generator */}
+              <div className="glass-card p-5">
+                <h2 className="font-bold mb-4" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  Color Temperature
+                </h2>
+                <div className="flex items-center gap-3 mb-4">
+                  <span className="text-xs text-amber-400">1000K</span>
+                  <input
+                    type="range" min={1000} max={10000} value={kelvin}
+                    onChange={(e) => setKelvin(+e.target.value)}
+                    className="flex-1"
+                    style={{ background: `linear-gradient(to right, #ff8000, #fff, #8ab4f8)` }}
+                  />
+                  <span className="text-xs text-blue-400">10000K</span>
+                </div>
+                <div className="flex items-center gap-3 mb-4">
+                  <div
+                    className="w-16 h-16 rounded-xl border border-white/10 shrink-0"
+                    style={{ backgroundColor: rgbToHex(...kelvinToRgb(kelvin)) }}
+                  />
+                  <div>
+                    <div className="text-sm font-mono font-bold">{kelvin}K</div>
+                    <div className="text-xs text-white/40 mt-0.5">{rgbToHex(...kelvinToRgb(kelvin))}</div>
+                    <div className="text-xs text-white/30 mt-0.5">
+                      {kelvin < 3000 ? "Warm / Incandescent" : kelvin < 5500 ? "Neutral / Daylight" : "Cool / Sky"}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    const base = rgbToHex(...kelvinToRgb(kelvin));
+                    setBaseColor(base);
+                    generate("analogous");
+                  }}
+                  className="glass-button px-4 py-2 rounded-xl text-sm w-full font-semibold"
+                  data-testid="apply-temp"
+                >
+                  Apply Temperature Palette
+                </button>
+              </div>
+
+              {/* Color info cards */}
+              <div className="glass-card p-5 lg:col-span-2">
+                <h2 className="font-bold mb-4" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  Palette Details
+                </h2>
+                <div className="grid grid-cols-5 gap-3">
+                  {colors.map((c, i) => {
+                    const [r, g, b] = hexToRgb(c);
+                    const [h, s, l] = hexToHsl(c);
+                    const ratio = getContrastRatio(c);
+                    return (
+                      <div
+                        key={i}
+                        className="flex flex-col gap-1.5 cursor-pointer"
+                        onClick={() => setInfoColor(c)}
+                        data-testid={`detail-card-${i}`}
+                      >
+                        <div className="w-full h-10 rounded-lg border border-white/10" style={{ backgroundColor: c }} />
+                        <div className="text-[10px] font-mono text-white/60">{c.toUpperCase()}</div>
+                        <div className="text-[9px] text-white/35">RGB {r},{g},{b}</div>
+                        <div className="text-[9px] text-white/35">H{h}° S{s}% L{l}%</div>
+                        <div className="text-[9px] text-white/35">{ratio}:1 contrast</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Blend Tab ── */}
+          {tab === "blend" && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="glass-card p-5">
+                <h2 className="font-bold mb-5" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  Color Blender
+                </h2>
+                <div className="space-y-5">
+                  <div className="flex gap-4 items-center">
+                    <div>
+                      <label className="text-xs text-white/50 mb-1 block">Color 1</label>
+                      <input type="color" value={blendColor1} onChange={(e) => setBlendColor1(e.target.value)}
+                        className="w-16 h-16 rounded-xl cursor-pointer" data-testid="blend-color1" />
+                    </div>
+                    <div className="flex-1 text-center">
+                      <div className="text-xs text-white/40 mb-2">Mix {blendRatio}%</div>
+                      <div className="w-full h-12 rounded-xl border border-white/10" style={{ backgroundColor: blendResult }} />
+                      <div className="text-xs font-mono text-white/60 mt-1">{blendResult}</div>
+                    </div>
+                    <div>
+                      <label className="text-xs text-white/50 mb-1 block">Color 2</label>
+                      <input type="color" value={blendColor2} onChange={(e) => setBlendColor2(e.target.value)}
+                        className="w-16 h-16 rounded-xl cursor-pointer" data-testid="blend-color2" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-white/50 mb-2 block">Ratio: {blendRatio}%</label>
+                    <input type="range" min={0} max={100} value={blendRatio}
+                      onChange={(e) => setBlendRatio(+e.target.value)}
+                      className="w-full"
+                      style={{ background: `linear-gradient(to right, ${blendColor1}, ${blendColor2})` }}
+                      data-testid="blend-ratio" />
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      const steps = generateBlendSteps(blendColor1, blendColor2, 5);
+                      setColors(steps);
+                      tryUnlock("master_blender");
+                      addPoints(10);
+                    }}
+                    className="glass-button w-full py-2.5 rounded-xl text-sm font-bold text-purple-300 border border-purple-500/40"
+                    data-testid="blend-generate"
+                  >
+                    Generate Blend Palette
+                  </button>
+                </div>
+              </div>
+
+              {/* 5-step blend preview */}
+              <div className="glass-card p-5">
+                <h2 className="font-bold mb-5" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  5-Step Blend
+                </h2>
+                <div className="space-y-2">
+                  {generateBlendSteps(blendColor1, blendColor2, 5).map((c, i) => (
+                    <div key={i} className="flex items-center gap-3">
+                      <div className="w-12 h-10 rounded-lg shrink-0" style={{ backgroundColor: c }} />
+                      <div className="text-xs font-mono flex-1">{c}</div>
+                      <div className="text-xs text-white/40">{Math.round((i / 4) * 100)}%</div>
+                      <button
+                        onClick={() => { navigator.clipboard.writeText(c); addPoints(1); }}
+                        className="text-xs glass-button px-2 py-1 rounded"
+                      >⎘</button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Multi-step blends */}
+                <div className="mt-5">
+                  <div className="text-xs text-white/50 mb-3">Preview strips</div>
+                  {[5, 7, 10].map((steps) => (
+                    <div key={steps} className="mb-2">
+                      <div className="text-[10px] text-white/30 mb-1">{steps} steps</div>
+                      <div className="flex h-8 rounded-lg overflow-hidden">
+                        {generateBlendSteps(blendColor1, blendColor2, steps).map((c, i) => (
+                          <div key={i} style={{ backgroundColor: c, flex: 1 }} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Gradient Tab ── */}
+          {tab === "gradient" && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="glass-card p-5">
+                <h2 className="font-bold mb-5" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  Gradient Builder
+                </h2>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs text-white/50 mb-2 block">Type</label>
+                    <div className="flex gap-2">
+                      {(["linear", "radial", "conic"] as GradientType[]).map((t) => (
+                        <button key={t} onClick={() => setGradientType(t)}
+                          className={`tab-pill flex-1 text-center ${gradientType === t ? "active" : ""}`}>
+                          {t.charAt(0).toUpperCase() + t.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {gradientType === "linear" && (
+                    <div>
+                      <label className="text-xs text-white/50 mb-2 block">Angle: {gradientAngle}°</label>
+                      <input type="range" min={0} max={360} value={gradientAngle}
+                        onChange={(e) => setGradientAngle(+e.target.value)} className="w-full" />
+                      <div className="flex justify-between text-[10px] text-white/30 mt-1">
+                        <span>0° ↑</span><span>90° →</span><span>180° ↓</span><span>270° ←</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="gradient-preview w-full" style={{ background: gradientCSS(), minHeight: 140 }} />
+
+                  <button
+                    onClick={() => {
+                      const css = `background: ${gradientCSS()};`;
+                      navigator.clipboard.writeText(css);
+                      setGradientCopied(true);
+                      setTimeout(() => setGradientCopied(false), 1500);
+                      tryUnlock("gradient_guru");
+                      addPoints(5);
+                    }}
+                    className="glass-button w-full py-2.5 rounded-xl text-sm font-bold text-cyan-300 border border-cyan-500/40"
+                    data-testid="copy-gradient"
+                  >
+                    {gradientCopied ? "✓ Copied!" : "⎘ Copy CSS"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Gradient variations */}
+              <div className="glass-card p-5">
+                <h2 className="font-bold mb-5" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  Gradient Variations
+                </h2>
+                <div className="space-y-3">
+                  {[0, 45, 90, 135, 180, 225, 270, 315].map((angle) => (
+                    <div key={angle} className="flex items-center gap-3 cursor-pointer group" onClick={() => setGradientAngle(angle)}>
+                      <div
+                        className="h-10 rounded-lg flex-1 border border-white/5 group-hover:border-purple-500/50 transition-colors"
+                        style={{ background: `linear-gradient(${angle}deg, ${colors.join(", ")})` }}
+                      />
+                      <span className="text-xs font-mono text-white/40 w-12 text-right">{angle}°</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Image Tab ── */}
+          {tab === "image" && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="glass-card p-5">
+                <h2 className="font-bold mb-5" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  Image Color Extractor
+                </h2>
+                <label className="block cursor-pointer">
+                  <div className="border-2 border-dashed border-purple-500/30 rounded-xl p-8 text-center hover:border-purple-500/60 transition-colors">
+                    <div className="text-3xl mb-3">◫</div>
+                    <div className="text-sm font-semibold">Drop image or click to upload</div>
+                    <div className="text-xs text-white/40 mt-1">JPG, PNG, GIF, WebP</div>
+                  </div>
+                  <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} data-testid="image-upload" />
+                </label>
+
+                {imagePreview && (
+                  <div className="mt-4">
+                    <img src={imagePreview} alt="Preview" className="w-full rounded-xl max-h-48 object-cover border border-white/10" />
+                  </div>
+                )}
+              </div>
+
+              <div className="glass-card p-5">
+                <h2 className="font-bold mb-5" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  Extracted Colors
+                  <span className="ml-2 text-xs text-purple-400">{extractedColors.length} colors</span>
+                </h2>
+                {extractedColors.length === 0 ? (
+                  <p className="text-sm text-white/30">Upload an image to extract colors</p>
+                ) : (
+                  <div className="grid grid-cols-5 gap-2">
+                    {extractedColors.map((c, i) => (
+                      <div
+                        key={i}
+                        className="group cursor-pointer"
+                        onClick={() => {
+                          const newColors = [...colors];
+                          newColors[i % 5] = c;
+                          setColors(newColors);
+                          addPoints(2);
+                        }}
+                        data-testid={`extracted-color-${i}`}
+                      >
+                        <div
+                          className="w-full aspect-square rounded-lg border border-white/10 group-hover:border-purple-400/60 transition-colors group-hover:scale-105 transform"
+                          style={{ backgroundColor: c }}
+                        />
+                        <div className="text-[9px] font-mono text-white/40 mt-1 text-center">{c}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {extractedColors.length > 0 && (
+                  <button
+                    onClick={() => {
+                      setColors(extractedColors.slice(0, 5));
+                      addPoints(5);
+                    }}
+                    className="glass-button w-full mt-4 py-2 rounded-xl text-sm font-semibold"
+                    data-testid="apply-extracted"
+                  >
+                    Apply Top 5 to Palette
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Data Viz Tab ── */}
+          {tab === "dataviz" && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="glass-card p-5">
+                <h2 className="font-bold mb-5" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  Data Visualization Palettes
+                </h2>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs text-white/50 mb-2 block">Scale Type</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["sequential","diverging","qualitative","heatmap"] as DataVizType[]).map((t) => (
+                        <button key={t} onClick={() => setDvType(t)}
+                          className={`tab-pill ${dvType === t ? "active" : ""}`}>
+                          {t.charAt(0).toUpperCase() + t.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-white/50 mb-2 block">Steps: {dvSteps}</label>
+                    <input type="range" min={3} max={10} value={dvSteps}
+                      onChange={(e) => setDvSteps(+e.target.value)} className="w-full" />
+                  </div>
+
+                  {/* Preview */}
+                  <div className="space-y-2">
+                    {(() => {
+                      const fns = { sequential: generateSequential, diverging: generateDiverging, qualitative: generateQualitative, heatmap: generateHeatmap };
+                      const preview = fns[dvType](dvSteps);
+                      return preview.map((c, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded shrink-0" style={{ backgroundColor: c }} />
+                          <div className="flex-1 h-8 rounded" style={{ backgroundColor: c }} />
+                          <div className="text-xs font-mono w-20 text-white/50">{c}</div>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      const fns = { sequential: generateSequential, diverging: generateDiverging, qualitative: generateQualitative, heatmap: generateHeatmap };
+                      const result = fns[dvType](dvSteps).slice(0, 5);
+                      while (result.length < 5) result.push(result[result.length - 1]);
+                      setColors(result);
+                      tryUnlock("data_scientist");
+                      addPoints(15);
+                    }}
+                    className="glass-button w-full py-2.5 rounded-xl text-sm font-bold text-cyan-300 border border-cyan-500/40"
+                    data-testid="apply-dataviz"
+                  >
+                    Apply to Palette
+                  </button>
+                </div>
+              </div>
+
+              {/* Descriptions */}
+              <div className="glass-card p-5">
+                <h2 className="font-bold mb-5" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  Scale Guide
+                </h2>
+                <div className="space-y-4 text-sm">
+                  {[
+                    { id: "sequential", label: "Sequential", desc: "Ordered data from low to high. Use for density maps, heatmaps, and ranked data.", example: "Temperature, population, revenue" },
+                    { id: "diverging", label: "Diverging", desc: "Two-sided data with a meaningful midpoint. Blue for negative, red for positive.", example: "Profit/loss, temperature anomaly, votes" },
+                    { id: "qualitative", label: "Qualitative", desc: "Categorical data with no inherent order. Evenly spaced hues.", example: "Categories, regions, product types" },
+                    { id: "heatmap", label: "Heatmap", desc: "Classic blue-to-red for intensity mapping.", example: "Activity, frequency, correlation" },
+                  ].map((s) => (
+                    <div key={s.id} className={`p-3 rounded-xl border transition-colors cursor-pointer ${dvType === s.id ? "border-purple-500/50 bg-purple-500/10" : "border-white/8"}`}
+                      onClick={() => setDvType(s.id as DataVizType)}>
+                      <div className="font-semibold text-sm">{s.label}</div>
+                      <div className="text-xs text-white/50 mt-1">{s.desc}</div>
+                      <div className="text-[10px] text-purple-400 mt-1">e.g. {s.example}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Music Tab ── */}
+          {tab === "music" && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="glass-card p-5">
+                <h2 className="font-bold mb-5" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  Music to Color
+                </h2>
+                <div className="space-y-5">
+                  <div>
+                    <label className="text-xs text-white/50 mb-2 block">Base Frequency: {frequency} Hz</label>
+                    <input type="range" min={20} max={2000} value={frequency}
+                      onChange={(e) => setFrequency(+e.target.value)} className="w-full"
+                      style={{ background: `linear-gradient(to right, #ff4500, #7700ff)` }}
+                      data-testid="frequency-slider" />
+                    <div className="flex justify-between text-[10px] text-white/30 mt-1">
+                      <span>20Hz Bass</span><span>440Hz A4</span><span>2000Hz Treble</span>
+                    </div>
+                  </div>
+
+                  {/* Preset notes */}
+                  <div>
+                    <label className="text-xs text-white/50 mb-2 block">Musical Notes</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { label: "C3", hz: 130 }, { label: "A3", hz: 220 }, { label: "A4", hz: 440 },
+                        { label: "E5", hz: 659 }, { label: "A5", hz: 880 }, { label: "A6", hz: 1760 },
+                      ].map((n) => (
+                        <button key={n.label} onClick={() => setFrequency(n.hz)}
+                          className={`tab-pill text-center ${frequency === n.hz ? "active" : ""}`}>
+                          {n.label} <span className="text-[9px] opacity-50">{n.hz}Hz</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Ratio info */}
+                  <div className="text-xs text-white/40 bg-white/3 rounded-xl p-3">
+                    <div className="font-semibold text-white/60 mb-1">Harmonic Ratios</div>
+                    {[["1:1", "Unison"], ["5:4", "Major third"], ["3:2", "Perfect fifth"], ["7:4", "Minor 7th"], ["2:1", "Octave"]].map(([r, n]) => (
+                      <div key={r} className="flex justify-between py-0.5"><span>{r}</span><span>{n}</span></div>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setColors(frequencyToColors(frequency));
+                      tryUnlock("sound_artist");
+                      addPoints(15);
+                    }}
+                    className="glass-button w-full py-2.5 rounded-xl text-sm font-bold text-pink-300 border border-pink-500/40"
+                    data-testid="apply-music"
+                  >
+                    Generate Music Palette
+                  </button>
+                </div>
+              </div>
+
+              {/* Music preview */}
+              <div className="glass-card p-5">
+                <h2 className="font-bold mb-5" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  Frequency Preview
+                </h2>
+                <div className="space-y-3">
+                  {frequencyToColors(frequency).map((c, i) => {
+                    const ratios = [1, 1.25, 1.5, 1.75, 2];
+                    const freq = Math.round(frequency * ratios[i]);
+                    return (
+                      <div key={i} className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-xl shrink-0" style={{ backgroundColor: c }} />
+                        <div className="flex-1">
+                          <div className="text-xs font-mono">{c}</div>
+                          <div className="text-[10px] text-white/40">{freq}Hz × {ratios[i]}</div>
+                        </div>
+                        <div
+                          className="h-8 rounded"
+                          style={{ backgroundColor: c, width: `${(ratios[i] / 2) * 100}%`, maxWidth: 80 }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-5 p-3 bg-white/3 rounded-xl text-xs text-white/40">
+                  Colors are derived by mapping frequency to hue angle: <br />
+                  <code className="text-purple-400">hue = ((f − 20) / 20000) × 360°</code>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── AI Tab ── */}
+          {tab === "ai" && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="glass-card p-5">
+                <h2 className="font-bold mb-5" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  AI Palette Generator
+                </h2>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs text-white/50 mb-2 block">Describe your palette</label>
+                    <textarea
+                      value={aiPrompt}
+                      onChange={(e) => setAiPrompt(e.target.value)}
+                      placeholder="e.g. 'Calm ocean at sunset' or 'Cyberpunk neon city'"
+                      rows={3}
+                      className="w-full resize-none"
+                      data-testid="ai-prompt"
+                    />
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (!aiPrompt.trim()) return;
+                      setColors(aiPromptToColors(aiPrompt));
+                      tryUnlock("ai_explorer");
+                      addPoints(20);
+                    }}
+                    className="glass-button w-full py-2.5 rounded-xl text-sm font-bold text-purple-300 border border-purple-500/40"
+                    data-testid="ai-generate"
+                  >
+                    ✦ Generate AI Palette
+                  </button>
+
+                  {/* Quick themes */}
+                  <div>
+                    <label className="text-xs text-white/50 mb-2 block">Quick themes</label>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(THEMES).map(([key, theme]) => (
+                        <button
+                          key={key}
+                          onClick={() => {
+                            setAiPrompt(theme.name);
+                            setColors(theme.colors);
+                            tryUnlock("ai_explorer");
+                            addPoints(20);
+                          }}
+                          className="tab-pill text-xs"
+                          data-testid={`theme-${key}`}
+                        >
+                          {theme.emoji} {theme.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Accessibility panel */}
+              <div className="glass-card p-5">
+                <h2 className="font-bold mb-5" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  Accessibility Check
+                </h2>
+                <div className="space-y-3">
+                  {colors.map((c, i) => {
+                    const ratio = getContrastRatio(c);
+                    const wcag = getWCAGRating(c);
+                    const wcagColors = { AAA: "text-emerald-400", AA: "text-yellow-400", Fail: "text-red-400" };
+                    return (
+                      <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-white/3">
+                        <div className="w-10 h-10 rounded-lg shrink-0" style={{ backgroundColor: c }} />
+                        <div className="flex-1">
+                          <div className="text-xs font-mono">{c}</div>
+                          <div className="text-[10px] text-white/40">vs white: {ratio}:1</div>
+                        </div>
+                        <div className={`text-xs font-bold ${wcagColors[wcag]}`}>{wcag}</div>
+                      </div>
+                    );
+                  })}
+                  <div className="text-[10px] text-white/30 mt-2 p-2">
+                    AAA ≥7:1 · AA ≥4.5:1 · Fail &lt;4.5:1 (WCAG 2.1)
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Seasonal Tab ── */}
+          {tab === "seasonal" && (
+            <div>
+              <h2 className="font-bold mb-4" style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem" }}>
+                Curated Themes
+              </h2>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {Object.entries(THEMES).map(([key, theme]) => (
+                  <div
+                    key={key}
+                    className="saved-palette-card glass-card overflow-hidden"
+                    onClick={() => {
+                      setColors(theme.colors);
+                      addPoints(5);
+                    }}
+                    data-testid={`seasonal-${key}`}
+                  >
+                    <div className="flex h-14">
+                      {theme.colors.map((c, i) => (
+                        <div key={i} style={{ backgroundColor: c, flex: 1 }} />
+                      ))}
+                    </div>
+                    <div className="p-3">
+                      <div className="text-sm font-semibold">{theme.emoji} {theme.name}</div>
+                      <div className="text-[10px] font-mono text-white/40 mt-1">
+                        {theme.colors[0]} +{theme.colors.length - 1}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Export Tab ── */}
+          {tab === "export" && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="glass-card p-5">
+                <h2 className="font-bold mb-5" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  Export Palette
+                </h2>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs text-white/50 mb-2 block">Format</label>
+                    <select
+                      value={exportFormat}
+                      onChange={(e) => setExportFormat(e.target.value as ExportFormat)}
+                      className="w-full"
+                      data-testid="export-format"
+                    >
+                      <option value="css">CSS Variables</option>
+                      <option value="scss">SCSS Variables</option>
+                      <option value="tailwind">Tailwind Config</option>
+                      <option value="json">JSON</option>
+                      <option value="array">JavaScript Array</option>
+                    </select>
+                  </div>
+
+                  <div className="code-block">
+                    <pre>{formatExport(colors, exportFormat)}</pre>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(formatExport(colors, exportFormat));
+                      setExportCopied(true);
+                      setTimeout(() => setExportCopied(false), 1500);
+                      setExportFormats((s) => {
+                        const next = new Set([...s, exportFormat]);
+                        if (next.size >= 3) tryUnlock("export_pro");
+                        return next;
+                      });
+                      addPoints(5);
+                    }}
+                    className="glass-button w-full py-2.5 rounded-xl text-sm font-bold text-lime-300 border border-lime-500/40"
+                    data-testid="copy-export"
+                  >
+                    {exportCopied ? "✓ Copied!" : "⎘ Copy to Clipboard"}
+                  </button>
+
+                  {/* Shareable URL */}
+                  <div>
+                    <label className="text-xs text-white/50 mb-2 block">Shareable URL</label>
+                    <div className="flex gap-2">
+                      <div className="code-block flex-1 text-[10px] py-2">
+                        ?colors={colors.join(",")}
+                      </div>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(`${window.location.origin}?colors=${colors.join(",")}`);
+                          setUrlCopied(true);
+                          setTimeout(() => setUrlCopied(false), 1500);
+                        }}
+                        className="glass-button px-3 rounded-xl text-sm shrink-0"
+                        data-testid="copy-url"
+                      >
+                        {urlCopied ? "✓" : "⎘"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Color strips */}
+              <div className="glass-card p-5">
+                <h2 className="font-bold mb-5" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  Color Swatches
+                </h2>
+                <div className="space-y-3">
+                  {colors.map((c, i) => {
+                    const [r, g, b] = hexToRgb(c);
+                    const [h, s, l] = hexToHsl(c);
+                    const [cy, m, y, k] = hexToCmyk(c);
+                    return (
+                      <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-white/3">
+                        <div className="w-12 h-12 rounded-xl shrink-0 border border-white/10" style={{ backgroundColor: c }} />
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 flex-1">
+                          <div className="text-[10px] text-white/70 font-mono">{c.toUpperCase()}</div>
+                          <div className="text-[10px] text-white/40">RGB {r},{g},{b}</div>
+                          <div className="text-[10px] text-white/40">H{h}° S{s}% L{l}%</div>
+                          <div className="text-[10px] text-white/40">C{cy} M{m} Y{y} K{k}</div>
+                        </div>
+                        <button
+                          onClick={() => { navigator.clipboard.writeText(c); addPoints(1); }}
+                          className="glass-button w-8 h-8 rounded-lg text-sm shrink-0"
+                        >⎘</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Saved Tab ── */}
+          {tab === "saved" && (
+            <div>
+              {/* Save form */}
+              <div className="glass-card p-5 mb-4">
+                <h2 className="font-bold mb-4" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                  Save Current Palette
+                </h2>
+                <div className="flex gap-3">
+                  <input
+                    type="text"
+                    value={paletteName}
+                    onChange={(e) => setPaletteName(e.target.value)}
+                    placeholder="Palette name..."
+                    className="flex-1"
+                    data-testid="palette-name-input"
+                  />
+                  <button
+                    onClick={() => {
+                      saveMutation.mutate({
+                        name: paletteName || "Untitled",
+                        colors: JSON.stringify(colors),
+                      });
+                      setPaletteName("");
+                      tryUnlock("collector");
+                      addPoints(15);
+                    }}
+                    className="glass-button px-5 py-2 rounded-xl text-sm font-bold text-purple-300 border border-purple-500/40 whitespace-nowrap"
+                    data-testid="save-palette-btn"
+                  >
+                    Save Current
+                  </button>
+                </div>
+                {/* Preview */}
+                <div className="flex h-8 rounded-lg overflow-hidden mt-3">
+                  {colors.map((c, i) => <div key={i} style={{ backgroundColor: c, flex: 1 }} />)}
+                </div>
+              </div>
+
+              {/* Saved grid */}
+              <h2 className="font-bold mb-4" style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>
+                Saved Palettes
+                <span className="ml-2 text-xs text-purple-400">{savedPalettes.length}</span>
+              </h2>
+              {savedPalettes.length === 0 ? (
+                <div className="glass-card p-8 text-center">
+                  <div className="text-3xl mb-3">◇</div>
+                  <div className="text-sm text-white/40">No saved palettes yet</div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {savedPalettes.map((p) => {
+                    const cols: string[] = JSON.parse(p.colors);
+                    return (
+                      <div key={p.id} className="saved-palette-card glass-card" data-testid={`saved-palette-${p.id}`}>
+                        <div
+                          className="flex h-12 cursor-pointer"
+                          onClick={() => { setColors(cols); addPoints(5); }}
+                        >
+                          {cols.map((c, i) => <div key={i} style={{ backgroundColor: c, flex: 1 }} />)}
+                        </div>
+                        <div className="p-3 flex items-center justify-between gap-2">
+                          <div>
+                            <div className="text-sm font-semibold">{p.name}</div>
+                            <div className="text-[10px] font-mono text-white/30">
+                              {new Date(p.createdAt!).toLocaleDateString()}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => deleteMutation.mutate(p.id)}
+                            className="w-7 h-7 rounded-full flex items-center justify-center text-sm text-red-400 hover:bg-red-500/20 transition-colors"
+                            data-testid={`delete-palette-${p.id}`}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+        </div>
+      </div>
+
+      {/* Footer */}
+      <footer className="relative z-10 glass border-t border-white/8 py-4 mt-8">
+        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between flex-wrap gap-3">
+          <div className="text-xs text-white/30">
+            ChromaFlow · 137 features · <span className="text-purple-400">{genCount}</span> palettes generated
+          </div>
+          <div className="flex gap-4 text-xs text-white/30">
+            <span>WCAG 2.1</span>
+            <span>·</span>
+            <span>sRGB / HSL / HSV / CMYK</span>
+            <span>·</span>
+            <span className="text-purple-400">v1.0.0</span>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}

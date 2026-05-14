@@ -2,16 +2,13 @@ import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const users = sqliteTable("users", {
+export const palettes = sqliteTable("palettes", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+  name: text("name").notNull().default("Untitled"),
+  colors: text("colors").notNull(), // JSON array of hex strings
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
 });
 
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
-});
-
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
+export const insertPaletteSchema = createInsertSchema(palettes).omit({ id: true, createdAt: true });
+export type InsertPalette = z.infer<typeof insertPaletteSchema>;
+export type Palette = typeof palettes.$inferSelect;
