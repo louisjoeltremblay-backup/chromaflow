@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { clientAiColors, serverAiColors } from "@/lib/aiColors";
 import {
   hexToRgb, hexToHsl, hexToHsv, hexToCmyk, getColorTemp, kelvinToRgb, rgbToHex,
   hslToHex, generateRandomColor, harmonies, simulateColorBlindness,
@@ -225,7 +226,7 @@ export default function App() {
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
-  const [aiSource, setAiSource] = useState<"web"|"fallback"|"">("");
+  const [aiSource, setAiSource] = useState<"web"|"ai-match"|"keyword"|"generated"|"fallback"|"">("");
   const [aiResultColors, setAiResultColors] = useState<string[]>([]);
 
   // Image
@@ -355,31 +356,43 @@ export default function App() {
   // ── REAL AI palette generation
   const runAiGenerate = async (prompt: string) => {
     if (!prompt.trim() || aiLoading) return;
+    const trimmed = prompt.trim();
     setAiLoading(true);
     setAiError("");
     setAiSource("");
     setAiResultColors([]);
+
+    // Step 1 — instant client-side match (always works, even offline)
+    const clientResult = clientAiColors(trimmed);
+
+    // Step 2 — try server search in parallel (richer results if available)
+    let finalColors = clientResult.colors;
+    let finalSource = clientResult.source;
+
     try {
-      const res = await apiRequest("POST", "/api/ai-colors", { prompt: prompt.trim() });
-      const data = await res.json();
-      if (data.colors && Array.isArray(data.colors)) {
-        const valid = data.colors.filter((c: string) => /^#[0-9a-fA-F]{6}$/i.test(c));
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const serverResult = await serverAiColors(trimmed, controller.signal);
+      clearTimeout(timeout);
+
+      if (serverResult.colors && serverResult.colors.length >= 5) {
+        const valid = serverResult.colors.filter((c: string) => /^#[0-9a-fA-F]{6}$/i.test(c));
         if (valid.length >= 5) {
-          setColors(valid.slice(0, 5));
-          setAiResultColors(valid.slice(0, 5));
-          setAiSource(data.source || "web");
-          setHistory((h) => [valid.slice(0, 5), ...h].slice(0, 20));
-          tryUnlock("ai_explorer");
-          addPoints(20);
-        } else {
-          setAiError("Couldn't find enough colors — try a more specific prompt.");
+          finalColors = valid.slice(0, 5);
+          finalSource = serverResult.source || "web";
         }
       }
-    } catch (err) {
-      setAiError("Search failed. Check your connection and try again.");
-    } finally {
-      setAiLoading(false);
+    } catch {
+      // Server unavailable — client result already set, continue silently
     }
+
+    setColors(finalColors);
+    setAiResultColors(finalColors);
+    setAiSource(finalSource as any);
+    setHistory((h) => [finalColors, ...h].slice(0, 20));
+    tryUnlock("ai_explorer");
+    addPoints(20);
+    setAiLoading(false);
   };
 
   // ── Image extraction
@@ -1036,8 +1049,10 @@ export default function App() {
                     <div className="p-3 bg-white/3 rounded-xl border border-white/8">
                       <div className="flex items-center gap-2 mb-2">
                         <span className="text-xs text-white/50">Result</span>
-                        {aiSource === "web" && <span className="text-[10px] text-lime-400 border border-lime-500/30 px-1.5 py-0.5 rounded-full">✓ Web Search</span>}
-                        {aiSource === "fallback" && <span className="text-[10px] text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded-full">Smart Fallback</span>}
+                        {(aiSource === "web") && <span className="text-[10px] text-lime-400 border border-lime-500/30 px-1.5 py-0.5 rounded-full">✓ Web Search</span>}
+                        {(aiSource === "ai-match") && <span className="text-[10px] text-cyan-400 border border-cyan-500/30 px-1.5 py-0.5 rounded-full">✓ AI Match</span>}
+                        {(aiSource === "keyword") && <span className="text-[10px] text-purple-400 border border-purple-500/30 px-1.5 py-0.5 rounded-full">✓ Keyword</span>}
+                        {(aiSource === "generated" || aiSource === "fallback") && <span className="text-[10px] text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded-full">✦ Generated</span>}
                       </div>
                       <div className="flex h-10 rounded-lg overflow-hidden">
                         {aiResultColors.map((c, i) => <div key={i} style={{ backgroundColor: c, flex: 1 }} />)}
