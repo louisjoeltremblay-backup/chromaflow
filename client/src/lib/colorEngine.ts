@@ -359,14 +359,72 @@ export function formatExport(colors: string[], format: string): string {
 
 // ─── Color Name Approximation ─────────────────────────────────────────────
 const COLOR_NAMES: [string, string][] = [
-  ["#FF0000","Red"],["#FF4500","OrangeRed"],["#FF6347","Tomato"],["#FF8C00","DarkOrange"],
-  ["#FFA500","Orange"],["#FFD700","Gold"],["#FFFF00","Yellow"],["#ADFF2F","GreenYellow"],
-  ["#00FF00","Lime"],["#008000","Green"],["#006400","DarkGreen"],["#00FFFF","Cyan"],
-  ["#00CED1","DarkTurquoise"],["#0000FF","Blue"],["#000080","Navy"],["#8B008B","DarkMagenta"],
-  ["#FF00FF","Magenta"],["#FF1493","DeepPink"],["#FFB6C1","LightPink"],["#FFC0CB","Pink"],
-  ["#FFFFFF","White"],["#C0C0C0","Silver"],["#808080","Gray"],["#000000","Black"],
-  ["#8B4513","SaddleBrown"],["#D2691E","Chocolate"],["#F4A460","SandyBrown"],
-  ["#FFDAB9","PeachPuff"],["#7B68EE","MediumSlateBlue"],["#9370DB","MediumPurple"],
+  // Reds
+  ["#FF0000","Red"],["#FF4500","OrangeRed"],["#FF6347","Tomato"],["#DC143C","Crimson"],
+  ["#8B0000","DarkRed"],["#B22222","FireBrick"],["#C0392B","Pomegranate"],["#E74C3C","Alizarin"],
+  ["#FF5252","Coral Red"],["#D32F2F","Deep Red"],["#EF5350","Indian Red"],["#C62828","Dark Crimson"],
+  // Oranges
+  ["#FF8C00","DarkOrange"],["#FFA500","Orange"],["#FF7043","DeepOrange"],["#FF6F00","Amber Dark"],
+  ["#FB8C00","Burnt Orange"],["#F57C00","Persimmon"],["#E65100","Burnt Sienna"],
+  // Yellows
+  ["#FFD700","Gold"],["#FFFF00","Yellow"],["#FFF176","Pale Yellow"],["#FFEE58","Canary"],
+  ["#FFD54F","Amber"],["#FFCA28","Honey"],["#FFC107","Marigold"],["#FFB300","Dark Amber"],
+  ["#F9A825","Saffron"],["#F57F17","Ochre"],["#FFFDE7","Cream Yellow"],["#FFF9C4","Lemon Chiffon"],
+  // Yellow-Greens
+  ["#ADFF2F","GreenYellow"],["#9ACD32","YellowGreen"],["#A3E635","Lime Green"],["#C6EF5A","Chartreuse"],
+  ["#DCEDC8","Pale Lime"],["#F0F4C3","Light Yellow-Green"],["#E6EE9C","Yellow-Green Tint"],
+  ["#C7E98B","Pale Lime Green"],["#ACED3B","Lime"],["#89D408","Bright Lime"],
+  ["#B5E61D","Electric Lime"],["#D4E157","Yellow Chartreuse"],
+  // Greens
+  ["#00FF00","Lime"],["#008000","Green"],["#006400","DarkGreen"],["#00C853","Vivid Green"],
+  ["#2E7D32","Forest Green"],["#388E3C","Fern"],["#43A047","Medium Green"],["#4CAF50","Emerald"],
+  ["#66BB6A","Sage Green"],["#81C784","Pistachio"],["#A5D6A7","Mint Green"],["#C8E6C9","Pale Green"],
+  ["#1B5E20","Deep Forest"],["#33691E","Olive Green"],["#558B2F","Moss"],["#7CB342","Apple Green"],
+  ["#8BC34A","Lawn Green"],["#AED581","Light Green"],["#8FBC8F","Sea Green"],
+  ["#00FA9A","MediumSpringGreen"],["#3CB371","MediumSeaGreen"],["#2E8B57","SeaGreen"],
+  ["#20B2AA","LightSeaGreen"],["#00FF7F","SpringGreen"],
+  // Cyans / Teals
+  ["#00FFFF","Cyan"],["#00CED1","DarkTurquoise"],["#40E0D0","Turquoise"],["#00BCD4","Teal Blue"],
+  ["#006064","Dark Teal"],["#00838F","Deep Teal"],["#0097A7","Medium Teal"],["#00ACC1","Cerulean"],
+  ["#00B4D8","Sky Blue"],["#4DD0E1","Aqua"],["#80DEEA","Light Aqua"],["#B2EBF2","Pale Aqua"],
+  ["#00897B","Teal"],["#26A69A","Medium Teal"],["#4DB6AC","Seafoam"],["#80CBC4","Pale Teal"],
+  // Blues
+  ["#0000FF","Blue"],["#000080","Navy"],["#00008B","DarkBlue"],["#0000CD","MediumBlue"],
+  ["#1565C0","Royal Blue"],["#1976D2","Cobalt"],["#1E88E5","Vivid Blue"],["#2196F3","Azure Blue"],
+  ["#42A5F5","Cornflower"],["#64B5F6","Light Blue"],["#90CAF9","Pale Blue"],["#BBDEFB","Ice Blue"],
+  ["#4169E1","RoyalBlue"],["#4682B4","SteelBlue"],["#5F9EA0","CadetBlue"],["#6495ED","Cornflower"],
+  ["#87CEEB","SkyBlue"],["#87CEFA","LightSkyBlue"],["#ADD8E6","LightBlue"],["#B0C4DE","LightSteelBlue"],
+  ["#0D47A1","Dark Royal Blue"],["#283593","Indigo Blue"],["#303F9F","Deep Indigo"],["#3949AB","Iris"],
+  // Purples / Violets
+  ["#8B008B","DarkMagenta"],["#800080","Purple"],["#9B59B6","Amethyst"],["#8E44AD","Dark Violet"],
+  ["#7B1FA2","Deep Purple"],["#8E24AA","Orchid Purple"],["#9C27B0","Grape"],["#AB47BC","Medium Purple"],
+  ["#BA68C8","Lavender Purple"],["#CE93D8","Light Purple"],["#E1BEE7","Pale Purple"],["#F3E5F5","Lavender Mist"],
+  ["#6A1B9A","Byzantium"],["#4527A0","Dark Indigo"],["#512DA8","Indigo"],["#5E35B1","Violet"],
+  ["#7E57C2","Medium Violet"],["#9575CD","Wisteria"],["#B39DDB","Lilac"],["#D1C4E9","Pale Violet"],
+  ["#4A148C","Deep Violet"],["#311B92","Ultra Violet"],["#BDA4EA","Soft Lavender"],["#C9A0DC","Orchid"],
+  // Pinks
+  ["#FF00FF","Magenta"],["#FF1493","DeepPink"],["#FF69B4","HotPink"],["#FFB6C1","LightPink"],
+  ["#FFC0CB","Pink"],["#DB7093","PaleVioletRed"],["#C71585","MediumVioletRed"],["#FF4081","Neon Pink"],
+  ["#F8BBD0","Baby Pink"],["#F48FB1","Carnation"],["#F06292","Flamingo"],["#EC407A","Rose"],["#E91E63","Vivid Pink"],
+  ["#AD1457","Dark Rose"],["#880E4F","Dark Raspberry"],
+  // Browns / Earthy
+  ["#8B4513","SaddleBrown"],["#D2691E","Chocolate"],["#F4A460","SandyBrown"],["#A52A2A","Brown"],
+  ["#800000","Maroon"],["#BC8F8F","RosyBrown"],["#CD853F","Peru"],["#DEB887","BurlyWood"],
+  ["#D2B48C","Tan"],["#FAEBD7","AntiqueWhite"],["#FFDEAD","Navajo White"],
+  ["#5D4037","Cocoa"],["#6D4C41","Mocha"],["#795548","Umber"],["#8D6E63","Warm Brown"],
+  ["#A1887F","Dusty Rose Brown"],["#BCAAA4","Pinkish Beige"],["#D7CCC8","Pale Taupe"],
+  // Grays
+  ["#FFFFFF","White"],["#F5F5F5","WhiteSmoke"],["#DCDCDC","Gainsboro"],["#C0C0C0","Silver"],
+  ["#A9A9A9","DarkGray"],["#808080","Gray"],["#696969","DimGray"],["#778899","LightSlateGray"],
+  ["#708090","SlateGray"],["#2F4F4F","DarkSlateGray"],["#000000","Black"],["#1C1C1C","Jet Black"],
+  ["#212121","Charcoal"],["#424242","Dark Charcoal"],["#616161","Medium Gray"],["#757575","Ash"],
+  ["#9E9E9E","Light Gray"],["#BDBDBD","Silver Gray"],["#E0E0E0","Pale Gray"],["#EEEEEE","Off White"],
+  ["#ECEFF1","Ice White"],["#CFD8DC","Blue Gray"],
+  // Neons / Special
+  ["#FFDAB9","PeachPuff"],["#FFE4B5","Moccasin"],["#FFFFF0","Ivory"],["#FAF0E6","Linen"],
+  ["#FFF8DC","Cornsilk"],["#F0FFF0","Honeydew"],["#F0FFFF","Azure"],["#F5FFFA","MintCream"],
+  ["#7B68EE","MediumSlateBlue"],["#9370DB","MediumPurple"],["#6B238E","Dark Grape"],
+  ["#E040FB","Electric Purple"],["#EA80FC","Bright Orchid"],["#7DF9FF","Electric Cyan"],
 ];
 
 export function getColorName(hex: string): string {
