@@ -77,16 +77,110 @@ const KEYWORD_HEX: Record<string, string> = {
   blood_orange:"#cc3300", mango:"#fdbe02", tropical:"#00b16a",
 };
 
+// ── Normalize a word: strip plurals, common suffixes, accents ─────────────────
+function normalizeWord(w: string): string[] {
+  const variants = [w];
+  // Strip trailing s/es/ish/ness/y
+  if (w.endsWith("ness")) variants.push(w.slice(0, -4));
+  if (w.endsWith("ish")) variants.push(w.slice(0, -3));
+  if (w.endsWith("ies")) variants.push(w.slice(0, -3) + "y");
+  if (w.endsWith("es") && w.length > 4) variants.push(w.slice(0, -2));
+  if (w.endsWith("s") && w.length > 3) variants.push(w.slice(0, -1));
+  if (w.endsWith("y") && w.length > 3) variants.push(w.slice(0, -1) + "ie");
+  return [...new Set(variants)];
+}
+
+// ── Single-color palettes: when the prompt IS a color name ────────────────────
+// Generate a full 5-color palette from a single named color
+const SINGLE_COLOR_PALETTES: Record<string, string[]> = {
+  purple:  ["#7b2fbe","#9b59b6","#b39ddb","#4a148c","#ce93d8"],
+  violet:  ["#8f00ff","#7b2fbe","#6a1b9a","#e040fb","#ab47bc"],
+  lavender:["#b57bdb","#c8a2c8","#e1bee7","#9c27b0","#d1c4e9"],
+  lilac:   ["#c8a2c8","#b39ddb","#ce93d8","#ba68c8","#e1bee7"],
+  indigo:  ["#3f00ff","#3949ab","#1a237e","#5c6bc0","#7986cb"],
+  magenta: ["#ff00ff","#e91e63","#c2185b","#f48fb1","#ad1457"],
+  red:     ["#e53e3e","#c62828","#b71c1c","#ef9a9a","#d32f2f"],
+  blue:    ["#2196f3","#1565c0","#0d47a1","#64b5f6","#1976d2"],
+  green:   ["#4caf50","#2e7d32","#1b5e20","#81c784","#388e3c"],
+  yellow:  ["#ffd700","#ffca28","#f9a825","#fff176","#ffb300"],
+  orange:  ["#ff8c00","#fb8c00","#e65100","#ffcc80","#f57c00"],
+  pink:    ["#ff69b4","#f06292","#e91e63","#f8bbd0","#ec407a"],
+  cyan:    ["#00bcd4","#00acc1","#006064","#80deea","#0097a7"],
+  teal:    ["#008080","#00897b","#004d40","#80cbc4","#26a69a"],
+  brown:   ["#795548","#5d4037","#3e2723","#a1887f","#6d4c41"],
+  black:   ["#1a1a2e","#16213e","#0f3460","#212121","#2d2d2d"],
+  white:   ["#ffffff","#f5f5f5","#eceff1","#e0e0e0","#fafafa"],
+  gray:    ["#9e9e9e","#757575","#616161","#bdbdbd","#424242"],
+  grey:    ["#9e9e9e","#757575","#616161","#bdbdbd","#424242"],
+  gold:    ["#ffd700","#d4af37","#c0a060","#b8860b","#f9a825"],
+  silver:  ["#c0c0c0","#9e9e9e","#bdbdbd","#e0e0e0","#757575"],
+  rose:    ["#ff007f","#e91e63","#f06292","#f48fb1","#c2185b"],
+  coral:   ["#ff6b6b","#ff5252","#ff7043","#ef9a9a","#e57373"],
+  peach:   ["#ffb347","#ffcc80","#ff8a65","#ffa726","#ffd180"],
+  mint:    ["#98ff98","#4caf50","#a5d6a7","#80cbc4","#c8e6c9"],
+  turquoise:["#40e0d0","#00bcd4","#26c6da","#00acc1","#80deea"],
+  emerald: ["#50c878","#2e7d32","#43a047","#66bb6a","#1b5e20"],
+  ruby:    ["#9b111e","#c62828","#b71c1c","#d32f2f","#ef5350"],
+  sapphire:["#0f52ba","#0d47a1","#1565c0","#1976d2","#42a5f5"],
+  amber:   ["#ffbf00","#ffc107","#ff8f00","#ffca28","#ffb300"],
+  crimson: ["#dc143c","#c62828","#b71c1c","#e53935","#ef5350"],
+  maroon:  ["#800000","#8b0000","#b71c1c","#c62828","#d32f2f"],
+  navy:    ["#001f5b","#0d47a1","#1a237e","#283593","#303f9f"],
+  beige:   ["#f5f5dc","#faebd7","#ffe4c4","#deb887","#d2b48c"],
+  cream:   ["#fffdd0","#fffff0","#faf0e6","#fff8dc","#fdf5e6"],
+  ivory:   ["#fffff0","#faf0e6","#fffdd0","#f5f5dc","#faebd7"],
+  chocolate:["#7b3f00","#5d4037","#6d4c41","#8d6e63","#795548"],
+  neon:    ["#39ff14","#ff00ff","#00ffff","#ff3300","#ffff00"],
+  pastel:  ["#ffb3ba","#ffdfba","#ffffba","#baffc9","#bae1ff"],
+  dark:    ["#1a1a2e","#16213e","#0f3460","#533483","#e94560"],
+  light:   ["#f8f9fa","#e9ecef","#dee2e6","#adb5bd","#f5f5f5"],
+  warm:    ["#ff8f00","#ff6f00","#f57c00","#fb8c00","#ff8c00"],
+  cool:    ["#4fc3f7","#29b6f6","#039be5","#0288d1","#0277bd"],
+  earthy:  ["#8b4513","#d2691e","#cd853f","#deb887","#f4a460"],
+  muted:   ["#9eadbc","#b0a89f","#a8b0b8","#c0b8b0","#b8c0c8"],
+  vibrant: ["#ff00ff","#00ffff","#ffff00","#ff0000","#00ff00"],
+  retro:   ["#ff6b6b","#ffd93d","#6bcb77","#4d96ff","#845ec2"],
+  vintage: ["#c8a882","#8b7355","#d2b48c","#bc8f5f","#a0785a"],
+  moody:   ["#4b5563","#374151","#1f2937","#6b7280","#9ca3af"],
+  dreamy:  ["#a8edea","#fed6e3","#d299c2","#fef9d7","#96c3eb"],
+  bold:    ["#e53935","#1e88e5","#43a047","#fb8c00","#8e24aa"],
+  sunset:  ["#ff6b35","#f7931e","#fdc830","#fc4a1a","#ff8c42"],
+  ocean:   ["#006994","#0e86d4","#055a8c","#003060","#68bbe3"],
+  forest:  ["#2d5016","#4a7c59","#6b8e23","#556b2f","#8fbc8f"],
+  fire:    ["#ff4500","#ff6347","#ff8c00","#ffa500","#ffd700"],
+  night:   ["#000080","#191970","#1e3a8a","#0f172a","#1e293b"],
+  candy:   ["#ff69b4","#ff1493","#ffb6c1","#ffc0cb","#db7093"],
+  tropical:["#ff6b9d","#c44569","#ffa07a","#fa8072","#e9967a"],
+  spring:  ["#ffb7c5","#98d8c8","#fff9a5","#b4e7ce","#e8f5e9"],
+  summer:  ["#ffd700","#ff8c00","#00ced1","#32cd32","#ff6347"],
+  autumn:  ["#d84315","#ff6f00","#f57c00","#795548","#ff8f00"],
+  winter:  ["#b3e5fc","#e1f5fe","#4fc3f7","#81d4fa","#bbdefb"],
+  earth:   ["#8b4513","#a0522d","#cd853f","#deb887","#f5deb3"],
+  space:   ["#0b0c1a","#1a1a3e","#2d1b69","#533483","#6f42c1"],
+  sand:    ["#c2b280","#d2b48c","#deb887","#f4a460","#f5deb3"],
+  aqua:    ["#00ffff","#00bcd4","#00acc1","#4dd0e1","#80deea"],
+  gothic:  ["#1a0a0a","#4a0e0e","#800020","#c41e3a","#2d0a2d"],
+  cyber:   ["#ff0090","#00fff9","#7700ff","#ffee00","#ff4500"],
+  aurora:  ["#00c896","#7c3aed","#ec4899","#3b82f6","#10b981"],
+};
+
 // ── Map a prompt to colors using keyword matching ─────────────────────────────
 export function extractColorsFromText(text: string): string[] {
   const lower = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ");
-  const words = lower.split(/\s+/);
+  const words = lower.split(/\s+/).filter(Boolean);
   const found: string[] = [];
 
-  // Try single words
+  // Try each word and its normalized variants against both dictionaries
   for (const word of words) {
-    if (KEYWORD_HEX[word] && !found.includes(KEYWORD_HEX[word])) {
-      found.push(KEYWORD_HEX[word]);
+    const variants = normalizeWord(word);
+    for (const v of variants) {
+      // Check single-color palette first (richer)
+      if (SINGLE_COLOR_PALETTES[v]) {
+        return SINGLE_COLOR_PALETTES[v]; // exact palette hit — return immediately
+      }
+      if (KEYWORD_HEX[v] && !found.includes(KEYWORD_HEX[v])) {
+        found.push(KEYWORD_HEX[v]);
+      }
     }
   }
 
@@ -163,6 +257,18 @@ function hashPalette(prompt: string): string[] {
 // ── Main client-side AI function ──────────────────────────────────────────────
 export function clientAiColors(prompt: string): { colors: string[]; source: string } {
   const lower = prompt.toLowerCase().trim();
+
+  // 0. Direct single-color-name check (handles "Purples", "Blues", "Reds" etc.)
+  const cleanWord = lower.replace(/[^a-z]/g, "");
+  for (const v of normalizeWord(cleanWord)) {
+    if (SINGLE_COLOR_PALETTES[v]) return { colors: SINGLE_COLOR_PALETTES[v], source: "ai-match" };
+  }
+  // also check each word individually for multi-word prompts
+  for (const w of lower.split(/\s+/).filter(Boolean)) {
+    for (const v of normalizeWord(w.replace(/[^a-z]/g, ""))) {
+      if (SINGLE_COLOR_PALETTES[v]) return { colors: SINGLE_COLOR_PALETTES[v], source: "ai-match" };
+    }
+  }
 
   // 1. Try mood palette regex matches
   for (const [regex, palette] of MOOD_PALETTES) {
